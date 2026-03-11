@@ -2,6 +2,18 @@ const GRID_SIZE = 24;
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 2;
 
+const PORT_TYPE_COLORS = {
+  Model: "#9b59ff",
+  TE: "#ffd84d",
+  VAE: "#ff5d5d",
+  Latents: "#ff79c6",
+  Image: "#66b3ff",
+  Audio: "#4fd6a7",
+  Conditioning: "#86d67f",
+  "Positive Conditioning": "#86d67f",
+  "Negative Conditioning": "#86d67f",
+};
+
 const state = {
   nodeDefs: {},
   workflows: [],
@@ -199,8 +211,9 @@ function addNode(type, worldPosition) {
     title: type,
     x: snap(base.x),
     y: snap(base.y),
-    width: 240,
-    height: 140,
+    width: 280,
+    height: 180,
+    collapsed: false,
     color: "",
     params: structuredClone(def.params || {}),
   });
@@ -227,6 +240,11 @@ function parsePortSpec(spec) {
   return { name: spec?.name || "port", optional: Boolean(spec?.optional) };
 }
 
+
+function getPortColor(portName) {
+  return PORT_TYPE_COLORS[portName] || "#87a8df";
+}
+
 function renderCanvas() {
   const wf = activeWorkflow();
   canvas.innerHTML = "";
@@ -241,15 +259,31 @@ function renderCanvas() {
     if (node.height) el.style.minHeight = `${Math.max(node.height, 90)}px`;
     if (node.color) el.style.background = node.color;
     el.dataset.nodeId = node.id;
-    el.onclick = (event) => {
+    el.onmousedown = (event) => {
       event.stopPropagation();
-      state.selectedNodeId = node.id;
-      renderCanvas();
+      if (state.selectedNodeId !== node.id) {
+        state.selectedNodeId = node.id;
+        renderCanvas();
+      }
     };
 
     const header = document.createElement("div");
     header.className = "node-header";
-    header.textContent = node.title || node.type;
+
+    const title = document.createElement("span");
+    title.textContent = node.title || node.type;
+
+    const collapseBtn = document.createElement("button");
+    collapseBtn.className = "collapse-toggle";
+    collapseBtn.textContent = node.collapsed ? "▸" : "▾";
+    collapseBtn.title = node.collapsed ? "Expand node" : "Collapse node";
+    collapseBtn.onclick = (event) => {
+      event.stopPropagation();
+      node.collapsed = !node.collapsed;
+      renderCanvas();
+    };
+
+    header.append(title, collapseBtn);
     header.ondblclick = (event) => {
       event.stopPropagation();
       const renamed = prompt("Rename node", node.title || node.type);
@@ -264,29 +298,32 @@ function renderCanvas() {
       el.appendChild(buildNodeToast(node));
     }
 
-    const ports = document.createElement("div");
-    ports.className = "node-ports";
-    (def.inputs || []).forEach((portSpec) => {
-      const parsed = parsePortSpec(portSpec);
-      ports.appendChild(portRow(parsed, "input", node.id));
-    });
-    (def.outputs || []).forEach((portSpec) => {
-      const parsed = parsePortSpec(portSpec);
-      ports.appendChild(portRow(parsed, "output", node.id));
-    });
-    el.appendChild(ports);
+    if (!node.collapsed) {
+      const ports = document.createElement("div");
+      ports.className = "node-ports";
+      (def.inputs || []).forEach((portSpec) => {
+        const parsed = parsePortSpec(portSpec);
+        ports.appendChild(portRow(parsed, "input", node.id));
+      });
+      (def.outputs || []).forEach((portSpec) => {
+        const parsed = parsePortSpec(portSpec);
+        ports.appendChild(portRow(parsed, "output", node.id));
+      });
+      el.appendChild(ports);
 
-    const widgets = document.createElement("div");
-    widgets.className = "node-widgets";
-    Object.entries(node.params || {}).forEach(([key, value]) => {
-      const input = buildParamInput(key, value);
-      input.onchange = () => {
-        node.params[key] = input.value;
-      };
-      widgets.appendChild(labelWrap(key, input));
-    });
-    el.appendChild(widgets);
+      const widgets = document.createElement("div");
+      widgets.className = "node-widgets";
+      widgets.onmousedown = (event) => event.stopPropagation();
+      Object.entries(node.params || {}).forEach(([key, value]) => {
+        const input = buildParamInput(key, value, (nextValue) => {
+          node.params[key] = nextValue;
+        });
+        widgets.appendChild(labelWrap(key, input));
+      });
+      el.appendChild(widgets);
+    }
 
+    enableResize(el, node);
     canvas.appendChild(el);
     resizeObserver.observe(el);
   });
@@ -318,7 +355,16 @@ function buildNodeToast(node) {
     renderCanvas();
   };
 
-  toast.append(deleteBtn, recolorBtn);
+  const collapseBtn = document.createElement("button");
+  collapseBtn.textContent = node.collapsed ? "▸" : "▾";
+  collapseBtn.title = node.collapsed ? "Expand" : "Collapse";
+  collapseBtn.onclick = (event) => {
+    event.stopPropagation();
+    node.collapsed = !node.collapsed;
+    renderCanvas();
+  };
+
+  toast.append(deleteBtn, recolorBtn, collapseBtn);
   return toast;
 }
 
@@ -330,7 +376,44 @@ function deleteNode(nodeId) {
   renderCanvas();
 }
 
-function buildParamInput(key, value) {
+function buildNumericInput(value, onValueChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "numeric-updown";
+
+  const down = document.createElement("button");
+  down.type = "button";
+  down.textContent = "◀";
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.value = Number(value ?? 0);
+
+  const up = document.createElement("button");
+  up.type = "button";
+  up.textContent = "▶";
+
+  const apply = (next) => {
+    const parsed = Number(next);
+    const safeValue = Number.isFinite(parsed) ? parsed : 0;
+    input.value = safeValue;
+    onValueChange(safeValue);
+  };
+
+  down.onclick = (event) => {
+    event.stopPropagation();
+    apply(Number(input.value) - 1);
+  };
+  up.onclick = (event) => {
+    event.stopPropagation();
+    apply(Number(input.value) + 1);
+  };
+  input.oninput = () => apply(input.value);
+
+  wrap.append(down, input, up);
+  return wrap;
+}
+
+function buildParamInput(key, value, onValueChange) {
   if (key === "sourceMode") {
     const select = document.createElement("select");
     ["checkpoint", "diffusers_directory"].forEach((mode) => {
@@ -340,7 +423,16 @@ function buildParamInput(key, value) {
       select.appendChild(opt);
     });
     select.value = value;
+    select.onchange = () => onValueChange(select.value);
     return select;
+  }
+
+  if (typeof value === "boolean") {
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = value;
+    input.onchange = () => onValueChange(input.checked);
+    return input;
   }
 
   if (key === "fileName") {
@@ -361,6 +453,7 @@ function buildParamInput(key, value) {
       select.appendChild(opt);
     });
     select.value = value;
+    select.onchange = () => onValueChange(select.value);
     return select;
   }
 
@@ -383,11 +476,17 @@ function buildParamInput(key, value) {
       select.appendChild(opt);
     });
     select.value = value;
+    select.onchange = () => onValueChange(select.value);
     return select;
+  }
+
+  if (typeof value === "number") {
+    return buildNumericInput(value, onValueChange);
   }
 
   const input = document.createElement(key.includes("text") ? "textarea" : "input");
   input.value = value;
+  input.onchange = () => onValueChange(input.value);
   return input;
 }
 
@@ -414,6 +513,8 @@ function portRow(portSpec, direction, nodeId) {
 
   const dot = document.createElement("button");
   dot.className = `port ${portSpec.optional ? "optional" : ""}`;
+  dot.style.borderColor = getPortColor(portSpec.name);
+  dot.style.background = `${getPortColor(portSpec.name)}22`;
   dot.dataset.nodeId = nodeId;
   dot.dataset.direction = direction;
   dot.dataset.portName = portSpec.name;
@@ -525,6 +626,37 @@ function enableDrag(handle, node) {
       state.cursorWorld = current;
       updateCoordHud(current.x, current.y);
       renderCanvas();
+    };
+
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+}
+
+function enableResize(nodeEl, node) {
+  const handle = document.createElement("div");
+  handle.className = "node-resize-handle";
+  nodeEl.appendChild(handle);
+
+  handle.onmousedown = (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = node.width || nodeEl.offsetWidth;
+    const startHeight = node.height || nodeEl.offsetHeight;
+
+    const onMove = (moveEvent) => {
+      node.width = Math.max(220, Math.round(startWidth + (moveEvent.clientX - startX)));
+      node.height = Math.max(90, Math.round(startHeight + (moveEvent.clientY - startY)));
+      nodeEl.style.width = `${node.width}px`;
+      nodeEl.style.minHeight = `${node.height}px`;
+      renderEdges();
     };
 
     const onUp = () => {
