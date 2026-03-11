@@ -261,46 +261,31 @@ function renderCanvas() {
     el.appendChild(header);
 
     if (state.selectedNodeId === node.id) {
-      const controls = document.createElement("div");
-      controls.className = "node-controls";
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.textContent = "Delete";
-      deleteBtn.onclick = (event) => {
-        event.stopPropagation();
-        deleteNode(node.id);
-      };
-
-      const recolorBtn = document.createElement("button");
-      recolorBtn.textContent = "Recolor";
-      recolorBtn.onclick = (event) => {
-        event.stopPropagation();
-        const color = prompt("Node color (CSS value)", node.color || "#1a1f29");
-        if (!color) return;
-        node.color = color;
-        renderCanvas();
-      };
-
-      controls.append(deleteBtn, recolorBtn);
-      el.appendChild(controls);
+      el.appendChild(buildNodeToast(node));
     }
 
+    const ports = document.createElement("div");
+    ports.className = "node-ports";
+    (def.inputs || []).forEach((portSpec) => {
+      const parsed = parsePortSpec(portSpec);
+      ports.appendChild(portRow(parsed, "input", node.id));
+    });
+    (def.outputs || []).forEach((portSpec) => {
+      const parsed = parsePortSpec(portSpec);
+      ports.appendChild(portRow(parsed, "output", node.id));
+    });
+    el.appendChild(ports);
+
+    const widgets = document.createElement("div");
+    widgets.className = "node-widgets";
     Object.entries(node.params || {}).forEach(([key, value]) => {
       const input = buildParamInput(key, value);
       input.onchange = () => {
         node.params[key] = input.value;
       };
-      el.appendChild(labelWrap(key, input));
+      widgets.appendChild(labelWrap(key, input));
     });
-
-    (def.inputs || []).forEach((portSpec) => {
-      const parsed = parsePortSpec(portSpec);
-      el.appendChild(portRow(parsed, "input", node.id));
-    });
-    (def.outputs || []).forEach((portSpec) => {
-      const parsed = parsePortSpec(portSpec);
-      el.appendChild(portRow(parsed, "output", node.id));
-    });
+    el.appendChild(widgets);
 
     canvas.appendChild(el);
     resizeObserver.observe(el);
@@ -308,6 +293,33 @@ function renderCanvas() {
 
   renderEdges();
   applyViewport();
+}
+
+function buildNodeToast(node) {
+  const toast = document.createElement("div");
+  toast.className = "node-toast";
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.textContent = "🗑";
+  deleteBtn.title = "Delete node";
+  deleteBtn.onclick = (event) => {
+    event.stopPropagation();
+    deleteNode(node.id);
+  };
+
+  const recolorBtn = document.createElement("button");
+  recolorBtn.textContent = "●";
+  recolorBtn.title = "Recolor node";
+  recolorBtn.onclick = (event) => {
+    event.stopPropagation();
+    const color = prompt("Node color (CSS value)", node.color || "#1a1f29");
+    if (!color) return;
+    node.color = color;
+    renderCanvas();
+  };
+
+  toast.append(deleteBtn, recolorBtn);
+  return toast;
 }
 
 function deleteNode(nodeId) {
@@ -420,9 +432,11 @@ function portRow(portSpec, direction, nodeId) {
   }
 
   if (direction === "input") {
+    row.classList.add("input");
     left.append(dot, label);
     row.appendChild(left);
   } else {
+    row.classList.add("output");
     right.append(label, dot);
     row.appendChild(right);
   }

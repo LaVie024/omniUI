@@ -54,36 +54,98 @@ body { margin: 0; background: #14161a; color: #e6e7ea; }
 }
 .node {
   position: absolute;
-  width: 240px;
-  min-width: 180px;
-  min-height: 90px;
-  border: 1px solid #384252;
-  background: #1a1f29;
-  border-radius: 8px;
-  padding: 8px;
+  width: 300px;
+  min-width: 220px;
+  min-height: 120px;
+  border: 1px solid #2e3847;
+  background: linear-gradient(180deg, #161a22 0%, #131821 100%);
+  border-radius: 14px;
   resize: both;
-  overflow: auto;
+  overflow: visible;
+  box-shadow: inset 0 1px 0 rgba(145, 168, 220, 0.07);
 }
-.node.selected { border-color: #70a1ff; box-shadow: 0 0 0 1px rgba(112, 161, 255, 0.6); }
-.node-header { font-weight: 700; margin-bottom: 8px; cursor: move; user-select: none; }
-.node-controls { display: flex; gap: 6px; margin-bottom: 8px; }
-.node-controls button { margin: 0; font-size: 11px; padding: 4px 6px; }
-.port-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; margin: 6px 0; gap: 8px; }
-.port-label { opacity: 0.9; }
+.node.selected { border-color: #5f9dff; box-shadow: 0 0 0 1px rgba(95, 157, 255, 0.55), inset 0 1px 0 rgba(145, 168, 220, 0.07); }
+.node-header {
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: 0.01em;
+  margin: 0;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: move;
+  user-select: none;
+}
+.node-toast {
+  position: absolute;
+  top: -42px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  gap: 8px;
+  background: rgba(18, 21, 28, 0.96);
+  border: 1px solid #364052;
+  border-radius: 10px;
+  padding: 4px;
+  z-index: 6;
+}
+.node-toast button {
+  width: 34px;
+  height: 30px;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 14px;
+  padding: 0;
+}
+.node-toast button:hover { background: #2a3140; }
+.node-ports {
+  position: relative;
+  z-index: 3;
+  padding: 8px 0;
+}
+.node-widgets {
+  position: relative;
+  z-index: 2;
+  padding: 10px 16px 16px;
+}
+.port-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 18px;
+  margin: 10px 0;
+  min-height: 22px;
+}
+.port-row.input { padding-left: 10px; }
+.port-row.output { padding-right: 10px; }
+.port-label { opacity: 0.96; }
 .port {
-  width: 13px;
-  height: 13px;
-  border: 1px solid #8ca8d7;
+  width: 15px;
+  height: 15px;
+  border: 2px solid #87a8df;
   border-radius: 50%;
   cursor: pointer;
-  background: #1f2d44;
-  flex: 0 0 13px;
+  background: #192538;
+  flex: 0 0 15px;
 }
 .port.optional { border-radius: 3px; }
 .port.active { background: #70a1ff; }
-.port-output-wrap, .port-input-wrap { display: flex; align-items: center; gap: 6px; }
-label { display: block; font-size: 12px; margin-bottom: 6px; }
-input, button, select, textarea { width: 100%; margin-top: 4px; background: #242b36; border: 1px solid #40495a; color: inherit; border-radius: 6px; padding: 6px; }
+.port-output-wrap, .port-input-wrap { display: flex; align-items: center; gap: 10px; }
+.port-input-wrap { margin-left: -18px; }
+.port-output-wrap { margin-right: -18px; margin-left: auto; }
+label { display: block; font-size: 15px; margin-bottom: 10px; opacity: 0.88; }
+.node-widgets input, .node-widgets button, .node-widgets select, .node-widgets textarea {
+  width: 100%;
+  margin-top: 4px;
+  background: #252b37;
+  border: 1px solid #414a5c;
+  color: inherit;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 16px;
+}
+button, input, select, textarea { background: #242b36; border: 1px solid #40495a; color: inherit; border-radius: 6px; }
 textarea { resize: none; }
 #customNodesInfo, #modelRegistry, #runtimeInfo, #runOutput { margin: 0; overflow: auto; border: 1px solid #2b3039; padding: 8px; background: #0f1217; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 #customNodesInfo, #modelRegistry, #runtimeInfo { min-height: 70px; margin-top: 8px; margin-bottom: 10px; }
