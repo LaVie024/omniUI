@@ -7,6 +7,7 @@ def register_io_nodes(registry: NodeRegistry) -> None:
     registry.register(
         NodeSpec(
             name="Load Image",
+            category="Input",
             inputs=[],
             outputs=["Image"],
             params={"fileName": ""},
@@ -15,6 +16,7 @@ def register_io_nodes(registry: NodeRegistry) -> None:
     registry.register(
         NodeSpec(
             name="Load Video",
+            category="Input",
             inputs=[],
             outputs=["Image"],
             params={"fileName": ""},
@@ -23,6 +25,7 @@ def register_io_nodes(registry: NodeRegistry) -> None:
     registry.register(
         NodeSpec(
             name="Load Audio",
+            category="Input",
             inputs=[],
             outputs=["Audio"],
             params={"fileName": ""},

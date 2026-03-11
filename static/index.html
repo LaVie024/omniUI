@@ -30,11 +30,21 @@
         <button id="exportJsonBtn">Export JSON</button>
         <input type="file" id="importJsonInput" accept="application/json" />
       </aside>
-      <section class="canvas-wrap">
-        <svg id="edgeLayer"></svg>
-        <div id="canvas"></div>
+      <section class="canvas-wrap" id="canvasWrap">
+        <div id="graphSurface">
+          <svg id="edgeLayer"></svg>
+          <div id="canvas"></div>
+        </div>
       </section>
     </main>
+
+    <div id="nodeSearchOverlay" class="hidden">
+      <div class="node-search-modal">
+        <h3>Add node</h3>
+        <input id="nodeSearchInput" placeholder="Search nodes..." />
+        <div id="nodeSearchResults"></div>
+      </div>
+    </div>
 
     <pre id="runOutput"></pre>
     <script src="/static/app.js"></script>

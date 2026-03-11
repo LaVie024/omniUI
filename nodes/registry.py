@@ -12,6 +12,7 @@ class NodeSpec:
     inputs: list[str]
     outputs: list[str]
     params: dict[str, Any]
+    category: str = "Other"
 
 
 class NodeRegistry:

@@ -1,3 +1,7 @@
+const GRID_SIZE = 24;
+const MIN_ZOOM = 0.35;
+const MAX_ZOOM = 2;
+
 const state = {
   nodeDefs: {},
   workflows: [],
@@ -7,8 +11,12 @@ const state = {
   inputMedia: { images: [], videos: [], audio: [] },
   runtime: null,
   customNodes: [],
+  viewport: { x: 0, y: 0, scale: 1 },
+  pan: null,
 };
 
+const canvasWrap = document.getElementById("canvasWrap");
+const graphSurface = document.getElementById("graphSurface");
 const canvas = document.getElementById("canvas");
 const edgeLayer = document.getElementById("edgeLayer");
 const tabList = document.getElementById("tabList");
@@ -16,6 +24,9 @@ const runOutput = document.getElementById("runOutput");
 const modelRegistry = document.getElementById("modelRegistry");
 const runtimeInfo = document.getElementById("runtimeInfo");
 const customNodesInfo = document.getElementById("customNodesInfo");
+const nodeSearchOverlay = document.getElementById("nodeSearchOverlay");
+const nodeSearchInput = document.getElementById("nodeSearchInput");
+const nodeSearchResults = document.getElementById("nodeSearchResults");
 
 function newWorkflow(name = `workflow-${Date.now()}`) {
   return { id: crypto.randomUUID(), name, nodes: [], edges: [] };
@@ -25,6 +36,42 @@ function activeWorkflow() {
   return state.workflows.find((wf) => wf.id === state.activeWorkflowId);
 }
 
+function snap(value) {
+  return Math.round(value / GRID_SIZE) * GRID_SIZE;
+}
+
+function screenToWorld(screenX, screenY) {
+  const rect = canvasWrap.getBoundingClientRect();
+  return {
+    x: (screenX - rect.left - state.viewport.x) / state.viewport.scale,
+    y: (screenY - rect.top - state.viewport.y) / state.viewport.scale,
+  };
+}
+
+function zoomAt(screenX, screenY, deltaY) {
+  const oldScale = state.viewport.scale;
+  const zoomFactor = deltaY < 0 ? 1.1 : 0.9;
+  const newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldScale * zoomFactor));
+  if (newScale === oldScale) return;
+
+  const rect = canvasWrap.getBoundingClientRect();
+  const localX = screenX - rect.left;
+  const localY = screenY - rect.top;
+  const worldX = (localX - state.viewport.x) / oldScale;
+  const worldY = (localY - state.viewport.y) / oldScale;
+
+  state.viewport.scale = newScale;
+  state.viewport.x = localX - worldX * newScale;
+  state.viewport.y = localY - worldY * newScale;
+  renderCanvas();
+}
+
+function applyViewport() {
+  graphSurface.style.transform = `translate(${state.viewport.x}px, ${state.viewport.y}px) scale(${state.viewport.scale})`;
+  graphSurface.style.backgroundPosition = `${state.viewport.x}px ${state.viewport.y}px`;
+  graphSurface.style.backgroundSize = `${GRID_SIZE * state.viewport.scale}px ${GRID_SIZE * state.viewport.scale}px`;
+}
+
 async function init() {
   const wf = newWorkflow("workflow-1");
   state.workflows.push(wf);
@@ -32,6 +79,8 @@ async function init() {
   await loadEnvironmentData();
   renderPalette();
   renderTabs();
+  bindViewportControls();
+  bindNodeSearch();
   renderCanvas();
 }
 
@@ -61,15 +110,43 @@ async function loadEnvironmentData() {
   renderCustomNodes();
 }
 
+function nodeCategories() {
+  const categories = {};
+  Object.entries(state.nodeDefs).forEach(([type, def]) => {
+    const category = def.category || "Other";
+    categories[category] ??= [];
+    categories[category].push(type);
+  });
+  Object.values(categories).forEach((items) => items.sort((a, b) => a.localeCompare(b)));
+  return Object.entries(categories).sort(([a], [b]) => a.localeCompare(b));
+}
+
 function renderPalette() {
   const palette = document.getElementById("nodePalette");
   palette.innerHTML = "";
-  Object.keys(state.nodeDefs).forEach((type) => {
-    const btn = document.createElement("button");
-    btn.className = "palette-item";
-    btn.textContent = type;
-    btn.onclick = () => addNode(type);
-    palette.appendChild(btn);
+
+  nodeCategories().forEach(([category, types], idx) => {
+    const details = document.createElement("details");
+    details.className = "palette-group";
+    if (idx === 0) details.open = true;
+
+    const summary = document.createElement("summary");
+    summary.textContent = category;
+    details.appendChild(summary);
+
+    const list = document.createElement("div");
+    list.className = "palette-group-items";
+
+    types.forEach((type) => {
+      const btn = document.createElement("button");
+      btn.className = "palette-item";
+      btn.textContent = type;
+      btn.onclick = () => addNode(type);
+      list.appendChild(btn);
+    });
+
+    details.appendChild(list);
+    palette.appendChild(details);
   });
 }
 
@@ -89,14 +166,15 @@ function renderRuntimeInfo() {
     : "Runtime unavailable";
 }
 
-function addNode(type) {
+function addNode(type, worldPosition) {
   const wf = activeWorkflow();
   const def = state.nodeDefs[type];
+  const base = worldPosition || { x: 80 + wf.nodes.length * 24, y: 80 + wf.nodes.length * 24 };
   wf.nodes.push({
     id: crypto.randomUUID(),
     type,
-    x: 50 + wf.nodes.length * 20,
-    y: 50 + wf.nodes.length * 20,
+    x: snap(base.x),
+    y: snap(base.y),
     params: structuredClone(def.params || {}),
   });
   renderCanvas();
@@ -151,6 +229,7 @@ function renderCanvas() {
   });
 
   wf.edges.forEach((edge) => drawEdge(edge));
+  applyViewport();
 }
 
 function buildParamInput(key, value) {
@@ -264,23 +343,118 @@ function drawEdge(edge) {
 }
 
 function enableDrag(handle, node) {
-  let dragging = false;
-  let offsetX = 0;
-  let offsetY = 0;
   handle.onmousedown = (event) => {
-    dragging = true;
-    offsetX = event.clientX - node.x;
-    offsetY = event.clientY - node.y;
+    event.stopPropagation();
+    const start = screenToWorld(event.clientX, event.clientY);
+    const drag = {
+      startMouse: start,
+      startNode: { x: node.x, y: node.y },
+    };
+
+    const onMove = (moveEvent) => {
+      const current = screenToWorld(moveEvent.clientX, moveEvent.clientY);
+      node.x = snap(drag.startNode.x + (current.x - drag.startMouse.x));
+      node.y = snap(drag.startNode.y + (current.y - drag.startMouse.y));
+      renderCanvas();
+    };
+
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   };
-  document.onmousemove = (event) => {
-    if (!dragging) return;
-    node.x = event.clientX - offsetX;
-    node.y = event.clientY - offsetY;
-    renderCanvas();
-  };
-  document.onmouseup = () => {
-    dragging = false;
-  };
+}
+
+function bindViewportControls() {
+  canvasWrap.addEventListener("mousedown", (event) => {
+    if (event.target.closest(".node")) return;
+    state.pan = {
+      startX: event.clientX,
+      startY: event.clientY,
+      viewportX: state.viewport.x,
+      viewportY: state.viewport.y,
+    };
+  });
+
+  document.addEventListener("mousemove", (event) => {
+    if (!state.pan) return;
+    state.viewport.x = state.pan.viewportX + (event.clientX - state.pan.startX);
+    state.viewport.y = state.pan.viewportY + (event.clientY - state.pan.startY);
+    applyViewport();
+  });
+
+  document.addEventListener("mouseup", () => {
+    state.pan = null;
+  });
+
+  canvasWrap.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      zoomAt(event.clientX, event.clientY, event.deltaY);
+    },
+    { passive: false },
+  );
+
+  canvasWrap.addEventListener("dblclick", (event) => {
+    if (event.target.closest(".node")) return;
+    const world = screenToWorld(event.clientX, event.clientY);
+    openNodeSearch(world);
+  });
+}
+
+function bindNodeSearch() {
+  nodeSearchInput.addEventListener("input", () => renderNodeSearchResults(nodeSearchInput.value));
+  nodeSearchOverlay.addEventListener("click", (event) => {
+    if (event.target === nodeSearchOverlay) closeNodeSearch();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeNodeSearch();
+  });
+}
+
+function openNodeSearch(position) {
+  nodeSearchOverlay.classList.remove("hidden");
+  nodeSearchOverlay.dataset.position = JSON.stringify(position);
+  nodeSearchInput.value = "";
+  renderNodeSearchResults("");
+  nodeSearchInput.focus();
+}
+
+function closeNodeSearch() {
+  nodeSearchOverlay.classList.add("hidden");
+  nodeSearchOverlay.dataset.position = "";
+}
+
+function renderNodeSearchResults(query) {
+  const normalized = query.trim().toLowerCase();
+  const categories = nodeCategories();
+  nodeSearchResults.innerHTML = "";
+
+  categories.forEach(([category, types]) => {
+    const filtered = types.filter((type) => type.toLowerCase().includes(normalized));
+    if (!filtered.length) return;
+
+    const heading = document.createElement("div");
+    heading.className = "search-category";
+    heading.textContent = category;
+    nodeSearchResults.appendChild(heading);
+
+    filtered.forEach((type) => {
+      const btn = document.createElement("button");
+      btn.className = "search-result";
+      btn.textContent = type;
+      btn.onclick = () => {
+        const position = JSON.parse(nodeSearchOverlay.dataset.position || "{\"x\":80,\"y\":80}");
+        addNode(type, position);
+        closeNodeSearch();
+      };
+      nodeSearchResults.appendChild(btn);
+    });
+  });
 }
 
 async function saveActiveWorkflow() {
