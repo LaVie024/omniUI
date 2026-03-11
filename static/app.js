@@ -1,51 +1,11 @@
-const NODE_DEFS = {
-  "Load Components": {
-    inputs: [],
-    outputs: ["Model", "TE", "VAE"],
-    params: {
-      sourceMode: "checkpoint",
-      modelName: "",
-      modelPath: "",
-      vaeName: "",
-      vaePath: "",
-    },
-  },
-  "Load LoRA": {
-    inputs: ["Model"],
-    outputs: ["Model"],
-    params: {
-      loraName: "",
-      scale: 1.0,
-    },
-  },
-  "Text Encode": {
-    inputs: ["TE"],
-    outputs: ["Conditioning"],
-    params: { text: "" },
-  },
-  Sampler: {
-    inputs: ["Model", "Conditioning"],
-    outputs: ["Latents"],
-    params: { steps: 20, guidance: 7.5, width: 512, height: 512 },
-  },
-  Decode: {
-    inputs: ["Latents", "VAE"],
-    outputs: ["Image"],
-    params: {},
-  },
-  "Save Image": {
-    inputs: ["Image"],
-    outputs: [],
-    params: { prefix: "output" },
-  },
-};
-
 const state = {
+  nodeDefs: {},
   workflows: [],
   activeWorkflowId: null,
   linking: null,
   models: { checkpoints: [], vae: [], loras: [] },
   runtime: null,
+  customNodes: [],
 };
 
 const canvas = document.getElementById("canvas");
@@ -54,6 +14,7 @@ const tabList = document.getElementById("tabList");
 const runOutput = document.getElementById("runOutput");
 const modelRegistry = document.getElementById("modelRegistry");
 const runtimeInfo = document.getElementById("runtimeInfo");
+const customNodesInfo = document.getElementById("customNodesInfo");
 
 function newWorkflow(name = `workflow-${Date.now()}`) {
   return { id: crypto.randomUUID(), name, nodes: [], edges: [] };
@@ -67,26 +28,51 @@ async function init() {
   const wf = newWorkflow("workflow-1");
   state.workflows.push(wf);
   state.activeWorkflowId = wf.id;
-  renderPalette();
   await loadEnvironmentData();
+  renderPalette();
   renderTabs();
   renderCanvas();
 }
 
 async function loadEnvironmentData() {
   try {
-    const [modelsResponse, runtimeResponse] = await Promise.all([
+    const [nodesRes, modelsRes, runtimeRes] = await Promise.all([
+      fetch("/api/nodes"),
       fetch("/api/models"),
       fetch("/api/runtime"),
     ]);
-    state.models = await modelsResponse.json();
-    state.runtime = await runtimeResponse.json();
+    const nodePayload = await nodesRes.json();
+    state.nodeDefs = nodePayload.nodes || {};
+    state.customNodes = nodePayload.loaded_custom_nodes || [];
+    state.models = await modelsRes.json();
+    state.runtime = await runtimeRes.json();
   } catch {
+    state.nodeDefs = {};
+    state.customNodes = [];
     state.models = { checkpoints: [], vae: [], loras: [] };
     state.runtime = null;
   }
   renderModelRegistry();
   renderRuntimeInfo();
+  renderCustomNodes();
+}
+
+function renderPalette() {
+  const palette = document.getElementById("nodePalette");
+  palette.innerHTML = "";
+  Object.keys(state.nodeDefs).forEach((type) => {
+    const btn = document.createElement("button");
+    btn.className = "palette-item";
+    btn.textContent = type;
+    btn.onclick = () => addNode(type);
+    palette.appendChild(btn);
+  });
+}
+
+function renderCustomNodes() {
+  customNodesInfo.textContent = state.customNodes.length
+    ? JSON.stringify(state.customNodes, null, 2)
+    : "No custom nodes loaded from custom_nodes/*.py";
 }
 
 function renderModelRegistry() {
@@ -99,27 +85,15 @@ function renderRuntimeInfo() {
     : "Runtime unavailable";
 }
 
-function renderPalette() {
-  const palette = document.getElementById("nodePalette");
-  palette.innerHTML = "";
-  Object.keys(NODE_DEFS).forEach((type) => {
-    const btn = document.createElement("button");
-    btn.className = "palette-item";
-    btn.textContent = type;
-    btn.onclick = () => addNode(type);
-    palette.appendChild(btn);
-  });
-}
-
 function addNode(type) {
   const wf = activeWorkflow();
-  const def = NODE_DEFS[type];
+  const def = state.nodeDefs[type];
   wf.nodes.push({
     id: crypto.randomUUID(),
     type,
     x: 50 + wf.nodes.length * 20,
     y: 50 + wf.nodes.length * 20,
-    params: structuredClone(def.params),
+    params: structuredClone(def.params || {}),
   });
   renderCanvas();
 }
@@ -145,7 +119,7 @@ function renderCanvas() {
   edgeLayer.innerHTML = "";
 
   wf.nodes.forEach((node) => {
-    const def = NODE_DEFS[node.type];
+    const def = state.nodeDefs[node.type] || { inputs: [], outputs: [] };
     const el = document.createElement("div");
     el.className = "node";
     el.style.left = `${node.x}px`;
@@ -158,7 +132,7 @@ function renderCanvas() {
     enableDrag(header, node);
     el.appendChild(header);
 
-    Object.entries(node.params).forEach(([key, value]) => {
+    Object.entries(node.params || {}).forEach(([key, value]) => {
       const input = buildParamInput(key, value);
       input.onchange = () => {
         node.params[key] = input.value;
@@ -166,8 +140,8 @@ function renderCanvas() {
       el.appendChild(labelWrap(key, input));
     });
 
-    def.inputs.forEach((name) => el.appendChild(portRow(name, "input", node.id)));
-    def.outputs.forEach((name) => el.appendChild(portRow(name, "output", node.id)));
+    (def.inputs || []).forEach((name) => el.appendChild(portRow(name, "input", node.id)));
+    (def.outputs || []).forEach((name) => el.appendChild(portRow(name, "output", node.id)));
 
     canvas.appendChild(el);
   });
@@ -242,12 +216,7 @@ function clickPort(port) {
   }
   if (port.direction !== "input") return;
   const wf = activeWorkflow();
-  wf.edges.push({
-    from: state.linking.nodeId,
-    out: state.linking.name,
-    to: port.nodeId,
-    in: port.name,
-  });
+  wf.edges.push({ from: state.linking.nodeId, out: state.linking.name, to: port.nodeId, in: port.name });
   state.linking.element.classList.remove("active");
   state.linking = null;
   renderCanvas();
@@ -257,12 +226,10 @@ function drawEdge(edge) {
   const fromNode = document.querySelector(`[data-node-id='${edge.from}']`);
   const toNode = document.querySelector(`[data-node-id='${edge.to}']`);
   if (!fromNode || !toNode) return;
-
   const x1 = fromNode.offsetLeft + fromNode.offsetWidth;
   const y1 = fromNode.offsetTop + fromNode.offsetHeight / 2;
   const x2 = toNode.offsetLeft;
   const y2 = toNode.offsetTop + toNode.offsetHeight / 2;
-
   const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
   line.setAttribute("d", `M ${x1} ${y1} C ${x1 + 60} ${y1}, ${x2 - 60} ${y2}, ${x2} ${y2}`);
   line.setAttribute("stroke", "#70a1ff");
@@ -275,20 +242,17 @@ function enableDrag(handle, node) {
   let dragging = false;
   let offsetX = 0;
   let offsetY = 0;
-
   handle.onmousedown = (event) => {
     dragging = true;
     offsetX = event.clientX - node.x;
     offsetY = event.clientY - node.y;
   };
-
   document.onmousemove = (event) => {
     if (!dragging) return;
     node.x = event.clientX - offsetX;
     node.y = event.clientY - offsetY;
     renderCanvas();
   };
-
   document.onmouseup = () => {
     dragging = false;
   };
@@ -332,7 +296,11 @@ document.getElementById("newWorkflowBtn").onclick = () => {
 
 document.getElementById("saveWorkflowBtn").onclick = saveActiveWorkflow;
 document.getElementById("runWorkflowBtn").onclick = runActiveWorkflow;
-document.getElementById("refreshModelsBtn").onclick = loadEnvironmentData;
+document.getElementById("refreshModelsBtn").onclick = async () => {
+  await loadEnvironmentData();
+  renderPalette();
+  renderCanvas();
+};
 document.getElementById("exportJsonBtn").onclick = exportJson;
 document.getElementById("importJsonInput").onchange = async (event) => {
   const file = event.target.files[0];

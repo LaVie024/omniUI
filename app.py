@@ -9,6 +9,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from nodes import build_registry
+from pipeline_builder import build_diffusers_pipeline
 from runtime import get_runtime_info, scaffold_generation_request
 
 ROOT = Path(__file__).parent
@@ -17,11 +19,14 @@ MODELS_DIR = ROOT / "models"
 CHECKPOINTS_DIR = MODELS_DIR / "checkpoints"
 VAE_DIR = MODELS_DIR / "vae"
 LORA_DIR = MODELS_DIR / "loras"
+CUSTOM_NODES_DIR = ROOT / "custom_nodes"
 
-for directory in [WORKFLOW_DIR, CHECKPOINTS_DIR, VAE_DIR, LORA_DIR]:
+for directory in [WORKFLOW_DIR, CHECKPOINTS_DIR, VAE_DIR, LORA_DIR, CUSTOM_NODES_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="OmniUI", version="0.2.0")
+NODE_REGISTRY, LOADED_CUSTOM_NODES = build_registry(CUSTOM_NODES_DIR)
+
+app = FastAPI(title="OmniUI", version="0.3.0")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
@@ -49,6 +54,11 @@ def index() -> FileResponse:
 @app.get("/api/runtime")
 def runtime_info() -> dict[str, Any]:
     return get_runtime_info()
+
+
+@app.get("/api/nodes")
+def list_nodes() -> dict[str, Any]:
+    return {"nodes": NODE_REGISTRY.as_dict(), "loaded_custom_nodes": LOADED_CUSTOM_NODES}
 
 
 @app.get("/api/models")
@@ -166,6 +176,26 @@ def compile_to_diffusers_plan(workflow: dict[str, Any]) -> dict[str, Any]:
                     "inputs": incoming.get(node_id, []),
                 }
             )
+        elif node_type == "Save Video":
+            plan_nodes.append(
+                {
+                    "id": node_id,
+                    "op": "save_video",
+                    "filename_prefix": params.get("prefix", "output_video"),
+                    "fps": int(params.get("fps", 8)),
+                    "inputs": incoming.get(node_id, []),
+                }
+            )
+        elif node_type == "Save Audio":
+            plan_nodes.append(
+                {
+                    "id": node_id,
+                    "op": "save_audio",
+                    "filename_prefix": params.get("prefix", "output_audio"),
+                    "sample_rate": int(params.get("sampleRate", 44100)),
+                    "inputs": incoming.get(node_id, []),
+                }
+            )
 
     return {
         "pipeline": "DiffusersGraphPipeline",
@@ -183,10 +213,12 @@ def run_workflow(payload: RunPayload) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     generation_scaffold = scaffold_generation_request(pipeline_plan)
+    build_result = build_diffusers_pipeline(pipeline_plan, MODELS_DIR)
 
     return {
         "status": "ok",
-        "message": "Workflow compiled to a Diffusers pipeline plan.",
+        "message": "Workflow compiled to a Diffusers pipeline plan and pipeline build was attempted.",
         "plan": pipeline_plan,
         "generation_scaffold": generation_scaffold,
+        "pipeline_build": build_result,
     }
