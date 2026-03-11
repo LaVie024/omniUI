@@ -9,8 +9,8 @@ from typing import Any
 @dataclass
 class NodeSpec:
     name: str
-    inputs: list[str]
-    outputs: list[str]
+    inputs: list[Any]
+    outputs: list[Any]
     params: dict[str, Any]
     category: str = "Other"
 

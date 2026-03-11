@@ -24,6 +24,9 @@ def build_diffusers_pipeline(plan: dict[str, Any], models_dir: Path) -> dict[str
     source_mode = load_node.get("source_mode")
     model_name = load_node.get("model_name") or ""
     model_path = load_node.get("model_path") or ""
+    load_vae_externally = bool(load_node.get("load_vae_externally", False))
+    vae_name = load_node.get("vae_name") or ""
+    vae_path = load_node.get("vae_path") or ""
 
     if source_mode == "checkpoint":
         if model_name:
@@ -42,6 +45,8 @@ def build_diffusers_pipeline(plan: dict[str, Any], models_dir: Path) -> dict[str
             "source_mode": source_mode,
             "source": str(source),
             "pipeline_class": "StableDiffusionPipeline",
+            "load_vae_externally": load_vae_externally,
+            "vae_source": str((models_dir / "vae" / vae_name) if vae_name else vae_path) if load_vae_externally else "from_checkpoint",
         }
 
     if source_mode == "diffusers_directory":
@@ -55,6 +60,8 @@ def build_diffusers_pipeline(plan: dict[str, Any], models_dir: Path) -> dict[str
             "source_mode": source_mode,
             "source": str(source),
             "pipeline_class": "StableDiffusionPipeline",
+            "load_vae_externally": load_vae_externally,
+            "vae_source": str((models_dir / "vae" / vae_name) if vae_name else vae_path) if load_vae_externally else "from_checkpoint",
         }
 
     return {"built": False, "reason": f"Unsupported source mode: {source_mode}"}

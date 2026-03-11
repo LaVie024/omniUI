@@ -158,6 +158,7 @@ def compile_to_diffusers_plan(workflow: dict[str, Any]) -> dict[str, Any]:
                     "model_path": params.get("modelPath", ""),
                     "vae_name": params.get("vaeName", ""),
                     "vae_path": params.get("vaePath", ""),
+                    "load_vae_externally": bool(params.get("loadVaeExternally", False)),
                     "outputs": ["Model", "TE", "VAE"],
                 }
             )
@@ -192,6 +193,7 @@ def compile_to_diffusers_plan(workflow: dict[str, Any]) -> dict[str, Any]:
                 }
             )
         elif node_type == "Sampler":
+            node_inputs = incoming.get(node_id, [])
             plan_nodes.append(
                 {
                     "id": node_id,
@@ -200,7 +202,25 @@ def compile_to_diffusers_plan(workflow: dict[str, Any]) -> dict[str, Any]:
                     "guidance": float(params.get("guidance", 7.5)),
                     "width": int(params.get("width", 512)),
                     "height": int(params.get("height", 512)),
-                    "inputs": incoming.get(node_id, []),
+                    "inputs": node_inputs,
+                    "positive_conditioning_connected": any(
+                        edge.get("in") == "Positive Conditioning" for edge in node_inputs
+                    ),
+                    "negative_conditioning_connected": any(
+                        edge.get("in") == "Negative Conditioning" for edge in node_inputs
+                    ),
+                    "negative_fallback_mode": "zeroed_positive_if_unset",
+                    "outputs": ["Latents"],
+                }
+            )
+        elif node_type == "Empty Latent Image":
+            plan_nodes.append(
+                {
+                    "id": node_id,
+                    "op": "empty_latent_image",
+                    "width": int(params.get("width", 512)),
+                    "height": int(params.get("height", 512)),
+                    "batch_size": int(params.get("batchSize", 1)),
                     "outputs": ["Latents"],
                 }
             )

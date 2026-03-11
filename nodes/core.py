@@ -16,6 +16,7 @@ def register_core_nodes(registry: NodeRegistry) -> None:
                 "modelPath": "",
                 "vaeName": "",
                 "vaePath": "",
+                "loadVaeExternally": False,
             },
         )
     )
@@ -41,9 +42,23 @@ def register_core_nodes(registry: NodeRegistry) -> None:
         NodeSpec(
             name="Sampler",
             category="Generation",
-            inputs=["Model", "Conditioning"],
+            inputs=[
+                "Model",
+                "Latents",
+                "Positive Conditioning",
+                {"name": "Negative Conditioning", "optional": True},
+            ],
             outputs=["Latents"],
             params={"steps": 20, "guidance": 7.5, "width": 512, "height": 512},
+        )
+    )
+    registry.register(
+        NodeSpec(
+            name="Empty Latent Image",
+            category="Generation",
+            inputs=[],
+            outputs=["Latents"],
+            params={"width": 512, "height": 512, "batchSize": 1},
         )
     )
     registry.register(
