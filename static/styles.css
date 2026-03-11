@@ -1,0 +1,136 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #14161a;
+  color: #e6e7ea;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 8px;
+  background: #1d2026;
+  border-bottom: 1px solid #2b3039;
+}
+
+.tab-list {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  overflow: auto;
+}
+
+.tab {
+  border: 1px solid #353d49;
+  background: #212630;
+  color: #f5f7fb;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tab.active {
+  border-color: #70a1ff;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  height: calc(100vh - 48px - 120px);
+}
+
+.sidebar {
+  border-right: 1px solid #2b3039;
+  padding: 12px;
+  overflow: auto;
+}
+
+.palette-item {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.canvas-wrap {
+  position: relative;
+  overflow: auto;
+}
+
+#canvas {
+  position: relative;
+  min-height: 800px;
+  min-width: 1200px;
+}
+
+#edgeLayer {
+  position: absolute;
+  inset: 0;
+  width: 1200px;
+  height: 800px;
+  pointer-events: none;
+}
+
+.node {
+  position: absolute;
+  width: 230px;
+  border: 1px solid #384252;
+  background: #1a1f29;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.node-header {
+  font-weight: 700;
+  margin-bottom: 8px;
+  cursor: move;
+}
+
+.port-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.port {
+  cursor: pointer;
+  padding: 2px 4px;
+  border: 1px solid #3b4454;
+  border-radius: 4px;
+}
+
+.port.active {
+  border-color: #70a1ff;
+}
+
+input,
+button,
+select,
+textarea {
+  width: 100%;
+  margin-top: 4px;
+  background: #242b36;
+  border: 1px solid #40495a;
+  color: inherit;
+  border-radius: 6px;
+  padding: 6px;
+}
+
+#runOutput {
+  margin: 0;
+  height: 120px;
+  overflow: auto;
+  border-top: 1px solid #2b3039;
+  padding: 8px;
+  background: #0f1217;
+  font-size: 12px;
+}
