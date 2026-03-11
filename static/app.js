@@ -13,12 +13,15 @@ const state = {
   customNodes: [],
   viewport: { x: 0, y: 0, scale: 1 },
   pan: null,
+  selectedNodeId: null,
+  cursorWorld: { x: 0, y: 0 },
 };
 
 const canvasWrap = document.getElementById("canvasWrap");
 const graphSurface = document.getElementById("graphSurface");
 const canvas = document.getElementById("canvas");
 const edgeLayer = document.getElementById("edgeLayer");
+const coordHud = document.getElementById("coordHud");
 const tabList = document.getElementById("tabList");
 const runOutput = document.getElementById("runOutput");
 const modelRegistry = document.getElementById("modelRegistry");
@@ -27,6 +30,17 @@ const customNodesInfo = document.getElementById("customNodesInfo");
 const nodeSearchOverlay = document.getElementById("nodeSearchOverlay");
 const nodeSearchInput = document.getElementById("nodeSearchInput");
 const nodeSearchResults = document.getElementById("nodeSearchResults");
+
+const resizeObserver = new ResizeObserver((entries) => {
+  for (const entry of entries) {
+    const nodeId = entry.target.dataset.nodeId;
+    const wf = activeWorkflow();
+    const node = wf?.nodes.find((n) => n.id === nodeId);
+    if (!node) continue;
+    node.width = Math.round(entry.contentRect.width);
+    node.height = Math.round(entry.contentRect.height);
+  }
+});
 
 function newWorkflow(name = `workflow-${Date.now()}`) {
   return { id: crypto.randomUUID(), name, nodes: [], edges: [] };
@@ -63,13 +77,22 @@ function zoomAt(screenX, screenY, deltaY) {
   state.viewport.scale = newScale;
   state.viewport.x = localX - worldX * newScale;
   state.viewport.y = localY - worldY * newScale;
-  renderCanvas();
+  applyViewport();
+  renderEdges();
 }
 
 function applyViewport() {
   graphSurface.style.transform = `translate(${state.viewport.x}px, ${state.viewport.y}px) scale(${state.viewport.scale})`;
-  graphSurface.style.backgroundPosition = `${state.viewport.x}px ${state.viewport.y}px`;
-  graphSurface.style.backgroundSize = `${GRID_SIZE * state.viewport.scale}px ${GRID_SIZE * state.viewport.scale}px`;
+  const scaledGrid = GRID_SIZE * state.viewport.scale;
+  const offsetX = ((state.viewport.x % scaledGrid) + scaledGrid) % scaledGrid;
+  const offsetY = ((state.viewport.y % scaledGrid) + scaledGrid) % scaledGrid;
+  canvasWrap.style.setProperty("--grid-size", `${scaledGrid}px`);
+  canvasWrap.style.setProperty("--grid-offset-x", `${offsetX}px`);
+  canvasWrap.style.setProperty("--grid-offset-y", `${offsetY}px`);
+}
+
+function updateCoordHud(x, y) {
+  coordHud.textContent = `X: ${Math.round(x)}  Y: ${Math.round(y)}`;
 }
 
 async function init() {
@@ -173,8 +196,12 @@ function addNode(type, worldPosition) {
   wf.nodes.push({
     id: crypto.randomUUID(),
     type,
+    title: type,
     x: snap(base.x),
     y: snap(base.y),
+    width: 240,
+    height: 140,
+    color: "",
     params: structuredClone(def.params || {}),
   });
   renderCanvas();
@@ -195,24 +222,68 @@ function renderTabs() {
   });
 }
 
+function parsePortSpec(spec) {
+  if (typeof spec === "string") return { name: spec, optional: false };
+  return { name: spec?.name || "port", optional: Boolean(spec?.optional) };
+}
+
 function renderCanvas() {
   const wf = activeWorkflow();
   canvas.innerHTML = "";
-  edgeLayer.innerHTML = "";
 
   wf.nodes.forEach((node) => {
     const def = state.nodeDefs[node.type] || { inputs: [], outputs: [] };
     const el = document.createElement("div");
-    el.className = "node";
+    el.className = `node ${state.selectedNodeId === node.id ? "selected" : ""}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
+    el.style.width = `${node.width || 240}px`;
+    if (node.height) el.style.minHeight = `${Math.max(node.height, 90)}px`;
+    if (node.color) el.style.background = node.color;
     el.dataset.nodeId = node.id;
+    el.onclick = (event) => {
+      event.stopPropagation();
+      state.selectedNodeId = node.id;
+      renderCanvas();
+    };
 
     const header = document.createElement("div");
     header.className = "node-header";
-    header.textContent = node.type;
+    header.textContent = node.title || node.type;
+    header.ondblclick = (event) => {
+      event.stopPropagation();
+      const renamed = prompt("Rename node", node.title || node.type);
+      if (!renamed) return;
+      node.title = renamed.trim();
+      renderCanvas();
+    };
     enableDrag(header, node);
     el.appendChild(header);
+
+    if (state.selectedNodeId === node.id) {
+      const controls = document.createElement("div");
+      controls.className = "node-controls";
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.textContent = "Delete";
+      deleteBtn.onclick = (event) => {
+        event.stopPropagation();
+        deleteNode(node.id);
+      };
+
+      const recolorBtn = document.createElement("button");
+      recolorBtn.textContent = "Recolor";
+      recolorBtn.onclick = (event) => {
+        event.stopPropagation();
+        const color = prompt("Node color (CSS value)", node.color || "#1a1f29");
+        if (!color) return;
+        node.color = color;
+        renderCanvas();
+      };
+
+      controls.append(deleteBtn, recolorBtn);
+      el.appendChild(controls);
+    }
 
     Object.entries(node.params || {}).forEach(([key, value]) => {
       const input = buildParamInput(key, value);
@@ -222,14 +293,29 @@ function renderCanvas() {
       el.appendChild(labelWrap(key, input));
     });
 
-    (def.inputs || []).forEach((name) => el.appendChild(portRow(name, "input", node.id)));
-    (def.outputs || []).forEach((name) => el.appendChild(portRow(name, "output", node.id)));
+    (def.inputs || []).forEach((portSpec) => {
+      const parsed = parsePortSpec(portSpec);
+      el.appendChild(portRow(parsed, "input", node.id));
+    });
+    (def.outputs || []).forEach((portSpec) => {
+      const parsed = parsePortSpec(portSpec);
+      el.appendChild(portRow(parsed, "output", node.id));
+    });
 
     canvas.appendChild(el);
+    resizeObserver.observe(el);
   });
 
-  wf.edges.forEach((edge) => drawEdge(edge));
+  renderEdges();
   applyViewport();
+}
+
+function deleteNode(nodeId) {
+  const wf = activeWorkflow();
+  wf.nodes = wf.nodes.filter((n) => n.id !== nodeId);
+  wf.edges = wf.edges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId);
+  if (state.selectedNodeId === nodeId) state.selectedNodeId = null;
+  renderCanvas();
 }
 
 function buildParamInput(key, value) {
@@ -300,14 +386,47 @@ function labelWrap(label, inputEl) {
   return wrap;
 }
 
-function portRow(name, direction, nodeId) {
+function portRow(portSpec, direction, nodeId) {
   const row = document.createElement("div");
   row.className = "port-row";
-  const side = document.createElement("span");
-  side.className = "port";
-  side.textContent = `${direction === "input" ? "←" : "→"} ${name}`;
-  side.onclick = () => clickPort({ nodeId, direction, name, element: side });
-  row.appendChild(side);
+
+  const left = document.createElement("div");
+  left.className = "port-input-wrap";
+
+  const right = document.createElement("div");
+  right.className = "port-output-wrap";
+
+  const label = document.createElement("span");
+  label.className = "port-label";
+  label.textContent = portSpec.name;
+
+  const dot = document.createElement("button");
+  dot.className = `port ${portSpec.optional ? "optional" : ""}`;
+  dot.dataset.nodeId = nodeId;
+  dot.dataset.direction = direction;
+  dot.dataset.portName = portSpec.name;
+  dot.onclick = (event) => {
+    event.stopPropagation();
+    clickPort({ nodeId, direction, name: portSpec.name, optional: portSpec.optional });
+  };
+
+  if (
+    state.linking &&
+    state.linking.nodeId === nodeId &&
+    state.linking.direction === direction &&
+    state.linking.name === portSpec.name
+  ) {
+    dot.classList.add("active");
+  }
+
+  if (direction === "input") {
+    left.append(dot, label);
+    row.appendChild(left);
+  } else {
+    right.append(label, dot);
+    row.appendChild(right);
+  }
+
   return row;
 }
 
@@ -315,31 +434,65 @@ function clickPort(port) {
   if (!state.linking) {
     if (port.direction !== "output") return;
     state.linking = port;
-    port.element.classList.add("active");
+    renderEdges();
     return;
   }
-  if (port.direction !== "input") return;
+
+  if (port.direction === "output") {
+    state.linking = port;
+    renderEdges();
+    return;
+  }
+
   const wf = activeWorkflow();
-  wf.edges.push({ from: state.linking.nodeId, out: state.linking.name, to: port.nodeId, in: port.name });
-  state.linking.element.classList.remove("active");
+  const exists = wf.edges.some(
+    (edge) => edge.from === state.linking.nodeId && edge.out === state.linking.name && edge.to === port.nodeId && edge.in === port.name,
+  );
+  if (!exists) {
+    wf.edges.push({ from: state.linking.nodeId, out: state.linking.name, to: port.nodeId, in: port.name });
+  }
   state.linking = null;
   renderCanvas();
 }
 
-function drawEdge(edge) {
-  const fromNode = document.querySelector(`[data-node-id='${edge.from}']`);
-  const toNode = document.querySelector(`[data-node-id='${edge.to}']`);
-  if (!fromNode || !toNode) return;
-  const x1 = fromNode.offsetLeft + fromNode.offsetWidth;
-  const y1 = fromNode.offsetTop + fromNode.offsetHeight / 2;
-  const x2 = toNode.offsetLeft;
-  const y2 = toNode.offsetTop + toNode.offsetHeight / 2;
+function getPortCenter(nodeId, direction, portName) {
+  const portEl = document.querySelector(
+    `.port[data-node-id='${nodeId}'][data-direction='${direction}'][data-port-name='${CSS.escape(portName)}']`,
+  );
+  if (!portEl) return null;
+  const portRect = portEl.getBoundingClientRect();
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  return {
+    x: (portRect.left + portRect.width / 2 - wrapRect.left - state.viewport.x) / state.viewport.scale,
+    y: (portRect.top + portRect.height / 2 - wrapRect.top - state.viewport.y) / state.viewport.scale,
+  };
+}
+
+function drawPath(from, to, color = "#70a1ff", dashed = false) {
   const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  line.setAttribute("d", `M ${x1} ${y1} C ${x1 + 60} ${y1}, ${x2 - 60} ${y2}, ${x2} ${y2}`);
-  line.setAttribute("stroke", "#70a1ff");
+  line.setAttribute("d", `M ${from.x} ${from.y} C ${from.x + 70} ${from.y}, ${to.x - 70} ${to.y}, ${to.x} ${to.y}`);
+  line.setAttribute("stroke", color);
   line.setAttribute("fill", "none");
   line.setAttribute("stroke-width", "2");
+  if (dashed) line.setAttribute("stroke-dasharray", "6 4");
   edgeLayer.appendChild(line);
+}
+
+function renderEdges() {
+  const wf = activeWorkflow();
+  edgeLayer.innerHTML = "";
+
+  wf.edges.forEach((edge) => {
+    const from = getPortCenter(edge.from, "output", edge.out);
+    const to = getPortCenter(edge.to, "input", edge.in);
+    if (!from || !to) return;
+    drawPath(from, to);
+  });
+
+  if (state.linking) {
+    const from = getPortCenter(state.linking.nodeId, "output", state.linking.name);
+    if (from) drawPath(from, state.cursorWorld, "#9bbcff", true);
+  }
 }
 
 function enableDrag(handle, node) {
@@ -355,6 +508,8 @@ function enableDrag(handle, node) {
       const current = screenToWorld(moveEvent.clientX, moveEvent.clientY);
       node.x = snap(drag.startNode.x + (current.x - drag.startMouse.x));
       node.y = snap(drag.startNode.y + (current.y - drag.startMouse.y));
+      state.cursorWorld = current;
+      updateCoordHud(current.x, current.y);
       renderCanvas();
     };
 
@@ -371,6 +526,8 @@ function enableDrag(handle, node) {
 function bindViewportControls() {
   canvasWrap.addEventListener("mousedown", (event) => {
     if (event.target.closest(".node")) return;
+    state.selectedNodeId = null;
+    renderCanvas();
     state.pan = {
       startX: event.clientX,
       startY: event.clientY,
@@ -380,10 +537,17 @@ function bindViewportControls() {
   });
 
   document.addEventListener("mousemove", (event) => {
-    if (!state.pan) return;
+    const world = screenToWorld(event.clientX, event.clientY);
+    state.cursorWorld = world;
+    updateCoordHud(world.x, world.y);
+    if (!state.pan) {
+      if (state.linking) renderEdges();
+      return;
+    }
     state.viewport.x = state.pan.viewportX + (event.clientX - state.pan.startX);
     state.viewport.y = state.pan.viewportY + (event.clientY - state.pan.startY);
     applyViewport();
+    renderEdges();
   });
 
   document.addEventListener("mouseup", () => {
@@ -403,6 +567,13 @@ function bindViewportControls() {
     if (event.target.closest(".node")) return;
     const world = screenToWorld(event.clientX, event.clientY);
     openNodeSearch(world);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.linking) {
+      state.linking = null;
+      renderEdges();
+    }
   });
 }
 
