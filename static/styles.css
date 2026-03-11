@@ -45,7 +45,7 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 300px 1fr;
   height: calc(100vh - 48px - 120px);
 }
 
@@ -67,15 +67,15 @@ body {
 
 #canvas {
   position: relative;
-  min-height: 800px;
-  min-width: 1200px;
+  min-height: 900px;
+  min-width: 1400px;
 }
 
 #edgeLayer {
   position: absolute;
   inset: 0;
-  width: 1200px;
-  height: 800px;
+  width: 1400px;
+  height: 900px;
   pointer-events: none;
 }
 
@@ -125,12 +125,29 @@ textarea {
   padding: 6px;
 }
 
+#modelRegistry,
+#runtimeInfo,
 #runOutput {
   margin: 0;
-  height: 120px;
   overflow: auto;
-  border-top: 1px solid #2b3039;
+  border: 1px solid #2b3039;
   padding: 8px;
   background: #0f1217;
   font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#modelRegistry,
+#runtimeInfo {
+  min-height: 92px;
+  margin-top: 8px;
+  margin-bottom: 10px;
+}
+
+#runOutput {
+  height: 120px;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
 }

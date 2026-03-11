@@ -9,11 +9,19 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from runtime import get_runtime_info, scaffold_generation_request
+
 ROOT = Path(__file__).parent
 WORKFLOW_DIR = ROOT / "workflows"
-WORKFLOW_DIR.mkdir(exist_ok=True)
+MODELS_DIR = ROOT / "models"
+CHECKPOINTS_DIR = MODELS_DIR / "checkpoints"
+VAE_DIR = MODELS_DIR / "vae"
+LORA_DIR = MODELS_DIR / "loras"
 
-app = FastAPI(title="OmniUI", version="0.1.0")
+for directory in [WORKFLOW_DIR, CHECKPOINTS_DIR, VAE_DIR, LORA_DIR]:
+    directory.mkdir(parents=True, exist_ok=True)
+
+app = FastAPI(title="OmniUI", version="0.2.0")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
@@ -25,9 +33,31 @@ class RunPayload(BaseModel):
     workflow: dict[str, Any]
 
 
+def _list_model_files(directory: Path, allowed_suffixes: set[str]) -> list[str]:
+    return sorted(
+        path.name
+        for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in allowed_suffixes
+    )
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(ROOT / "static" / "index.html")
+
+
+@app.get("/api/runtime")
+def runtime_info() -> dict[str, Any]:
+    return get_runtime_info()
+
+
+@app.get("/api/models")
+def list_models() -> dict[str, list[str]]:
+    return {
+        "checkpoints": _list_model_files(CHECKPOINTS_DIR, {".safetensors", ".ckpt", ".pt"}),
+        "vae": _list_model_files(VAE_DIR, {".safetensors", ".pt"}),
+        "loras": _list_model_files(LORA_DIR, {".safetensors", ".pt"}),
+    }
 
 
 @app.get("/api/workflows")
@@ -52,7 +82,6 @@ def save_workflow(name: str, payload: WorkflowPayload) -> dict[str, str]:
 
 
 def compile_to_diffusers_plan(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Compile a frontend workflow graph into an execution plan that maps to Diffusers."""
     nodes = {node["id"]: node for node in workflow.get("nodes", [])}
     edges = workflow.get("edges", [])
 
@@ -78,9 +107,22 @@ def compile_to_diffusers_plan(workflow: dict[str, Any]) -> dict[str, Any]:
                     "id": node_id,
                     "op": "load_components",
                     "source_mode": source_mode,
+                    "model_name": params.get("modelName", ""),
                     "model_path": params.get("modelPath", ""),
+                    "vae_name": params.get("vaeName", ""),
                     "vae_path": params.get("vaePath", ""),
                     "outputs": ["Model", "TE", "VAE"],
+                }
+            )
+        elif node_type == "Load LoRA":
+            plan_nodes.append(
+                {
+                    "id": node_id,
+                    "op": "load_lora",
+                    "lora_name": params.get("loraName", ""),
+                    "scale": float(params.get("scale", 1.0)),
+                    "inputs": incoming.get(node_id, []),
+                    "outputs": ["Model"],
                 }
             )
         elif node_type == "Text Encode":
@@ -127,6 +169,7 @@ def compile_to_diffusers_plan(workflow: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pipeline": "DiffusersGraphPipeline",
+        "runtime": get_runtime_info(),
         "node_count": len(plan_nodes),
         "nodes": plan_nodes,
     }
@@ -139,9 +182,11 @@ def run_workflow(payload: RunPayload) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # TODO: map plan into concrete diffusers objects for execution workers.
+    generation_scaffold = scaffold_generation_request(pipeline_plan)
+
     return {
         "status": "ok",
         "message": "Workflow compiled to a Diffusers pipeline plan.",
         "plan": pipeline_plan,
+        "generation_scaffold": generation_scaffold,
     }

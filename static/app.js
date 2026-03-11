@@ -4,8 +4,18 @@ const NODE_DEFS = {
     outputs: ["Model", "TE", "VAE"],
     params: {
       sourceMode: "checkpoint",
+      modelName: "",
       modelPath: "",
+      vaeName: "",
       vaePath: "",
+    },
+  },
+  "Load LoRA": {
+    inputs: ["Model"],
+    outputs: ["Model"],
+    params: {
+      loraName: "",
+      scale: 1.0,
     },
   },
   "Text Encode": {
@@ -34,12 +44,16 @@ const state = {
   workflows: [],
   activeWorkflowId: null,
   linking: null,
+  models: { checkpoints: [], vae: [], loras: [] },
+  runtime: null,
 };
 
 const canvas = document.getElementById("canvas");
 const edgeLayer = document.getElementById("edgeLayer");
 const tabList = document.getElementById("tabList");
 const runOutput = document.getElementById("runOutput");
+const modelRegistry = document.getElementById("modelRegistry");
+const runtimeInfo = document.getElementById("runtimeInfo");
 
 function newWorkflow(name = `workflow-${Date.now()}`) {
   return { id: crypto.randomUUID(), name, nodes: [], edges: [] };
@@ -49,13 +63,40 @@ function activeWorkflow() {
   return state.workflows.find((wf) => wf.id === state.activeWorkflowId);
 }
 
-function init() {
+async function init() {
   const wf = newWorkflow("workflow-1");
   state.workflows.push(wf);
   state.activeWorkflowId = wf.id;
   renderPalette();
+  await loadEnvironmentData();
   renderTabs();
   renderCanvas();
+}
+
+async function loadEnvironmentData() {
+  try {
+    const [modelsResponse, runtimeResponse] = await Promise.all([
+      fetch("/api/models"),
+      fetch("/api/runtime"),
+    ]);
+    state.models = await modelsResponse.json();
+    state.runtime = await runtimeResponse.json();
+  } catch {
+    state.models = { checkpoints: [], vae: [], loras: [] };
+    state.runtime = null;
+  }
+  renderModelRegistry();
+  renderRuntimeInfo();
+}
+
+function renderModelRegistry() {
+  modelRegistry.textContent = JSON.stringify(state.models, null, 2);
+}
+
+function renderRuntimeInfo() {
+  runtimeInfo.textContent = state.runtime
+    ? JSON.stringify(state.runtime, null, 2)
+    : "Runtime unavailable";
 }
 
 function renderPalette() {
@@ -118,24 +159,7 @@ function renderCanvas() {
     el.appendChild(header);
 
     Object.entries(node.params).forEach(([key, value]) => {
-      const input = document.createElement(
-        key.includes("text") ? "textarea" : key === "sourceMode" ? "select" : "input"
-      );
-      if (key === "sourceMode") {
-        ["checkpoint", "diffusers_directory"].forEach((mode) => {
-          const opt = document.createElement("option");
-          opt.value = mode;
-          opt.textContent = mode;
-          input.appendChild(opt);
-        });
-      }
-      if (input.tagName === "INPUT") {
-        input.value = value;
-      } else if (input.tagName === "TEXTAREA") {
-        input.value = value;
-      } else {
-        input.value = value;
-      }
+      const input = buildParamInput(key, value);
       input.onchange = () => {
         node.params[key] = input.value;
       };
@@ -149,6 +173,46 @@ function renderCanvas() {
   });
 
   wf.edges.forEach((edge) => drawEdge(edge));
+}
+
+function buildParamInput(key, value) {
+  if (key === "sourceMode") {
+    const select = document.createElement("select");
+    ["checkpoint", "diffusers_directory"].forEach((mode) => {
+      const opt = document.createElement("option");
+      opt.value = mode;
+      opt.textContent = mode;
+      select.appendChild(opt);
+    });
+    select.value = value;
+    return select;
+  }
+
+  if (key === "modelName" || key === "vaeName" || key === "loraName") {
+    const select = document.createElement("select");
+    const options =
+      key === "modelName"
+        ? state.models.checkpoints
+        : key === "vaeName"
+          ? state.models.vae
+          : state.models.loras;
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "(select from models/)";
+    select.appendChild(blank);
+    options.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option;
+      opt.textContent = option;
+      select.appendChild(opt);
+    });
+    select.value = value;
+    return select;
+  }
+
+  const input = document.createElement(key.includes("text") ? "textarea" : "input");
+  input.value = value;
+  return input;
 }
 
 function labelWrap(label, inputEl) {
@@ -268,6 +332,7 @@ document.getElementById("newWorkflowBtn").onclick = () => {
 
 document.getElementById("saveWorkflowBtn").onclick = saveActiveWorkflow;
 document.getElementById("runWorkflowBtn").onclick = runActiveWorkflow;
+document.getElementById("refreshModelsBtn").onclick = loadEnvironmentData;
 document.getElementById("exportJsonBtn").onclick = exportJson;
 document.getElementById("importJsonInput").onchange = async (event) => {
   const file = event.target.files[0];
