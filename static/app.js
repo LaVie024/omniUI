@@ -49,6 +49,7 @@ const resizeObserver = new ResizeObserver((entries) => {
     const wf = activeWorkflow();
     const node = wf?.nodes.find((n) => n.id === nodeId);
     if (!node) continue;
+    if (entry.contentRect.width <= 0 || entry.contentRect.height <= 0) continue;
     node.width = Math.round(entry.contentRect.width);
     node.height = Math.round(entry.contentRect.height);
   }
@@ -247,6 +248,7 @@ function getPortColor(portName) {
 
 function renderCanvas() {
   const wf = activeWorkflow();
+  resizeObserver.disconnect();
   canvas.innerHTML = "";
 
   wf.nodes.forEach((node) => {
