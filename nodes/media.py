@@ -7,6 +7,7 @@ def register_media_nodes(registry: NodeRegistry) -> None:
     registry.register(
         NodeSpec(
             name="Save Image",
+            category="Output",
             inputs=["Image"],
             outputs=[],
             params={"prefix": "output"},
@@ -15,6 +16,7 @@ def register_media_nodes(registry: NodeRegistry) -> None:
     registry.register(
         NodeSpec(
             name="Save Video",
+            category="Output",
             inputs=["Image"],
             outputs=[],
             params={"prefix": "output_video", "fps": 8},
@@ -23,6 +25,7 @@ def register_media_nodes(registry: NodeRegistry) -> None:
     registry.register(
         NodeSpec(
             name="Save Audio",
+            category="Output",
             inputs=["Audio"],
             outputs=[],
             params={"prefix": "output_audio", "sampleRate": 44100},
@@ -31,6 +34,7 @@ def register_media_nodes(registry: NodeRegistry) -> None:
     registry.register(
         NodeSpec(
             name="Preview Save Image",
+            category="Preview",
             inputs=["Image"],
             outputs=[],
             params={"prefix": "preview"},
@@ -39,6 +43,7 @@ def register_media_nodes(registry: NodeRegistry) -> None:
     registry.register(
         NodeSpec(
             name="Preview Save Video",
+            category="Preview",
             inputs=["Image"],
             outputs=[],
             params={"prefix": "preview_video", "fps": 8},
@@ -47,6 +52,7 @@ def register_media_nodes(registry: NodeRegistry) -> None:
     registry.register(
         NodeSpec(
             name="Preview Save Audio",
+            category="Preview",
             inputs=["Audio"],
             outputs=[],
             params={"prefix": "preview_audio", "sampleRate": 44100},
