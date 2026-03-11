@@ -4,6 +4,7 @@ const state = {
   activeWorkflowId: null,
   linking: null,
   models: { checkpoints: [], vae: [], loras: [] },
+  inputMedia: { images: [], videos: [], audio: [] },
   runtime: null,
   customNodes: [],
 };
@@ -36,20 +37,23 @@ async function init() {
 
 async function loadEnvironmentData() {
   try {
-    const [nodesRes, modelsRes, runtimeRes] = await Promise.all([
+    const [nodesRes, modelsRes, inputRes, runtimeRes] = await Promise.all([
       fetch("/api/nodes"),
       fetch("/api/models"),
+      fetch("/api/input"),
       fetch("/api/runtime"),
     ]);
     const nodePayload = await nodesRes.json();
     state.nodeDefs = nodePayload.nodes || {};
     state.customNodes = nodePayload.loaded_custom_nodes || [];
     state.models = await modelsRes.json();
+    state.inputMedia = await inputRes.json();
     state.runtime = await runtimeRes.json();
   } catch {
     state.nodeDefs = {};
     state.customNodes = [];
     state.models = { checkpoints: [], vae: [], loras: [] };
+    state.inputMedia = { images: [], videos: [], audio: [] };
     state.runtime = null;
   }
   renderModelRegistry();
@@ -156,6 +160,27 @@ function buildParamInput(key, value) {
       const opt = document.createElement("option");
       opt.value = mode;
       opt.textContent = mode;
+      select.appendChild(opt);
+    });
+    select.value = value;
+    return select;
+  }
+
+  if (key === "fileName") {
+    const select = document.createElement("select");
+    const allMedia = [
+      ...state.inputMedia.images,
+      ...state.inputMedia.videos,
+      ...state.inputMedia.audio,
+    ];
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "(select from input/)";
+    select.appendChild(blank);
+    allMedia.forEach((option) => {
+      const opt = document.createElement("option");
+      opt.value = option;
+      opt.textContent = option;
       select.appendChild(opt);
     });
     select.value = value;

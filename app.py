@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import shutil
+from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -16,17 +19,38 @@ from runtime import get_runtime_info, scaffold_generation_request
 ROOT = Path(__file__).parent
 WORKFLOW_DIR = ROOT / "workflows"
 MODELS_DIR = ROOT / "models"
+INPUT_DIR = ROOT / "input"
+OUTPUT_DIR = ROOT / "output"
+TEMP_DIR = ROOT / "temp"
 CHECKPOINTS_DIR = MODELS_DIR / "checkpoints"
 VAE_DIR = MODELS_DIR / "vae"
 LORA_DIR = MODELS_DIR / "loras"
 CUSTOM_NODES_DIR = ROOT / "custom_nodes"
 
-for directory in [WORKFLOW_DIR, CHECKPOINTS_DIR, VAE_DIR, LORA_DIR, CUSTOM_NODES_DIR]:
+for directory in [
+    WORKFLOW_DIR,
+    INPUT_DIR,
+    OUTPUT_DIR,
+    TEMP_DIR,
+    CHECKPOINTS_DIR,
+    VAE_DIR,
+    LORA_DIR,
+    CUSTOM_NODES_DIR,
+]:
     directory.mkdir(parents=True, exist_ok=True)
 
 NODE_REGISTRY, LOADED_CUSTOM_NODES = build_registry(CUSTOM_NODES_DIR)
 
-app = FastAPI(title="OmniUI", version="0.3.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    yield
+    if TEMP_DIR.exists():
+        shutil.rmtree(TEMP_DIR, ignore_errors=True)
+
+
+app = FastAPI(title="OmniUI", version="0.4.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
@@ -44,6 +68,10 @@ def _list_model_files(directory: Path, allowed_suffixes: set[str]) -> list[str]:
         for path in directory.iterdir()
         if path.is_file() and path.suffix.lower() in allowed_suffixes
     )
+
+
+def _default_output_subdir(preview: bool) -> str:
+    return str(TEMP_DIR if preview else OUTPUT_DIR / date.today().isoformat())
 
 
 @app.get("/")
@@ -67,6 +95,15 @@ def list_models() -> dict[str, list[str]]:
         "checkpoints": _list_model_files(CHECKPOINTS_DIR, {".safetensors", ".ckpt", ".pt"}),
         "vae": _list_model_files(VAE_DIR, {".safetensors", ".pt"}),
         "loras": _list_model_files(LORA_DIR, {".safetensors", ".pt"}),
+    }
+
+
+@app.get("/api/input")
+def list_input_media() -> dict[str, list[str]]:
+    return {
+        "images": _list_model_files(INPUT_DIR, {".png", ".jpg", ".jpeg", ".webp"}),
+        "videos": _list_model_files(INPUT_DIR, {".mp4", ".webm", ".mov", ".mkv"}),
+        "audio": _list_model_files(INPUT_DIR, {".wav", ".mp3", ".flac", ".ogg", ".m4a"}),
     }
 
 
@@ -135,6 +172,15 @@ def compile_to_diffusers_plan(workflow: dict[str, Any]) -> dict[str, Any]:
                     "outputs": ["Model"],
                 }
             )
+        elif node_type in {"Load Image", "Load Video", "Load Audio"}:
+            plan_nodes.append(
+                {
+                    "id": node_id,
+                    "op": node_type.lower().replace(" ", "_"),
+                    "input_path": str(INPUT_DIR / params.get("fileName", "")),
+                    "inputs": incoming.get(node_id, []),
+                }
+            )
         elif node_type == "Text Encode":
             plan_nodes.append(
                 {
@@ -167,35 +213,28 @@ def compile_to_diffusers_plan(workflow: dict[str, Any]) -> dict[str, Any]:
                     "outputs": ["Image"],
                 }
             )
-        elif node_type == "Save Image":
-            plan_nodes.append(
-                {
-                    "id": node_id,
-                    "op": "save_image",
-                    "filename_prefix": params.get("prefix", "output"),
-                    "inputs": incoming.get(node_id, []),
-                }
-            )
-        elif node_type == "Save Video":
-            plan_nodes.append(
-                {
-                    "id": node_id,
-                    "op": "save_video",
-                    "filename_prefix": params.get("prefix", "output_video"),
-                    "fps": int(params.get("fps", 8)),
-                    "inputs": incoming.get(node_id, []),
-                }
-            )
-        elif node_type == "Save Audio":
-            plan_nodes.append(
-                {
-                    "id": node_id,
-                    "op": "save_audio",
-                    "filename_prefix": params.get("prefix", "output_audio"),
-                    "sample_rate": int(params.get("sampleRate", 44100)),
-                    "inputs": incoming.get(node_id, []),
-                }
-            )
+        elif node_type in {
+            "Save Image",
+            "Save Video",
+            "Save Audio",
+            "Preview Save Image",
+            "Preview Save Video",
+            "Preview Save Audio",
+        }:
+            preview = node_type.startswith("Preview")
+            op = node_type.lower().replace(" ", "_")
+            node_plan = {
+                "id": node_id,
+                "op": op,
+                "filename_prefix": params.get("prefix", "output"),
+                "output_dir": _default_output_subdir(preview=preview),
+                "inputs": incoming.get(node_id, []),
+            }
+            if "fps" in params:
+                node_plan["fps"] = int(params.get("fps", 8))
+            if "sampleRate" in params:
+                node_plan["sample_rate"] = int(params.get("sampleRate", 44100))
+            plan_nodes.append(node_plan)
 
     return {
         "pipeline": "DiffusersGraphPipeline",
