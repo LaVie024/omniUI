@@ -1,3 +1,5 @@
+# Entirely vibecoded and in very early alpha. Expect issues upon issues upon issues... ...upon issues.
+
 # omniUI
 
 Lightweight node-based frontend for building and running Diffusers workflows.
